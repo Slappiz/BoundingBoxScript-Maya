@@ -1,0 +1,255 @@
+{
+    proc createBoundingBox()
+    {
+        int $isAxisOn = 0;
+        $isAxisOn = `checkBox -q -value axisAlignName`; //Asign value of axis align checkbox
+        float $offsetValue = `floatSliderGrp -q -value offsetValue`; //Value of offset slider   
+        
+        string $selected[];
+        $selected = selectedNodes(); 
+        
+        float $rotate[] = getAttr ($selected[0] + ".rotate"); //0:x, 1:y,  2z
+
+        if ($isAxisOn == 0) //If axis aligned is false
+        {
+            select $selected; 
+            rotate 0 0 0 ; //Set rotate to 0 for exactWorldBoundingBox -> polyCube
+        }
+        
+        select $selected; 
+        makeIdentity -apply true -t 1 -r 1 -s 1 -n 0 -pn 1; //freeze transformation
+        float $findValues[] = `exactWorldBoundingBox`; //xmin, ymin, zmin, xmax, ymax, zmax
+
+        if ($isAxisOn == 0) //If axis aligned is false
+        {
+            rotate $rotate[0] $rotate[1] $rotate[2]; //Reset rotation to original rotation
+        }
+        
+        float $XYZ[] = `objectCenter -gl $selected`; //(reset)Centerpivot of selected object 0:x,1:y,2:z  // -gl = global , -l = local
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        if (`radioButtonGrp -q -select myRadBtnGrp` == 1) //For Cube
+        { 
+            float $valueX = $findValues[3]-$findValues[0]; //Vector length X = Xmax-Xmin
+            float $valueY = $findValues[4]-$findValues[1]; //Vector length Y = Ymax-Ymin
+            float $valueZ = $findValues[5]-$findValues[2]; //Vector length Z = Zmax-Zmin
+            
+            $valueX *= $offsetValue; //Add offset value to size of cube
+            $valueY *= $offsetValue;  
+            $valueZ *= $offsetValue;  
+        
+            polyCube -name ($selected[0] + "_bBox") -width ($valueX) -height ($valueY) -depth ($valueZ);
+            setAttr ($selected[0] + "_bBox" + ".translate", $XYZ[0], $XYZ[1], $XYZ[2]); 
+
+            if ($isAxisOn == 0) //If axis aligned is false
+            {
+                setAttr ($selected[0] + "_bBox" + ".rotate", $rotate[0], $rotate[1], $rotate[2]); //Set boundingBox rotation to selected objects rotation
+            }
+        }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        if (`radioButtonGrp -q -select myRadBtnGrp` == 2) //For Sphere
+        {   
+            int $nVerts[] = `polyEvaluate -v $selected[0]`; //number of vertex points in mesh 
+            float $posVert[3]; //position of vertexpoint for each loop, X Y and Z
+            vector $tempPosVector; //position of vector for each loop
+            float $tempMag[]; //array for magnitudes of all vectors in mesh 
+            vector $centerVector = <<$XYZ[0], $XYZ[1], $XYZ[2]>>; //coordinates of center point vector in object
+            float $radius = 0; //value of radius for bouning spehere
+             
+            int $i = 0; 
+            for ($i = 0; $i < $nVerts[0]; $i++)
+            {
+                $posVert = `xform -q -os -t ($selected[0] + ".vtx" + "[" + $i + "]")`;
+               
+                $tempPosVector = <<$posVert[0], $posVert[1], $posVert[2]>>; // position of vertex from center as vector
+                $tempMag[$i] = mag(abs($tempPosVector - $centerVector)); //magnitude of the vector from center
+                
+            }
+            
+            int $j = 0;
+            for ($j = 0; $j < $nVerts[0]; $j++)
+            {
+                if ($radius < $tempMag[$j]) //check which of the magnitudes that has the highest value. 
+                {
+                    $radius = $tempMag[$j];
+                }
+            }                                  
+            $radius *= $offsetValue; //Add offset value to sphere radius
+
+            polySphere -name ($selected[0] + "_bSphere") -r ($radius); //
+            setAttr ($selected[0] + "_bSphere" + ".translate", $XYZ[0], $XYZ[1], $XYZ[2]); 
+            if ($isAxisOn == 0) //If axis aligned is false
+            { 
+                setAttr ($selected[0] + "_bSphere" + ".rotate", $rotate[0], $rotate[1], $rotate[2]); //Set boundingBox rotation to selected objects rotation
+            }
+        }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+        int $isNewShaderOn = 0;
+        $isNewShaderOn = `checkBox -q -value newShaderName`; //
+        
+        if($isNewShaderOn == 1)//If New Shader is true
+        {
+            //maybe create shader group before creating the shader
+            float $transparencyValue = `floatSliderGrp -q -value transparencyValue`;
+            float $color[] = `colorSliderGrp -query -rgb nameRGBslider`;
+            
+            if(`radioButtonGrp -q -select myRadBtnGrp` == 1)//cube 
+                select ($selected[0] + "_bBox");
+            if(`radioButtonGrp -q -select myRadBtnGrp` == 2)//sphere
+                select ($selected[0] + "_bSphere"); 
+            //($selected[0] + "_bSphere" + "bBoxShader") as shader name please
+            string $bBoxShader = `shadingNode -asShader lambert -n "bBoxShader"`;
+            hyperShade -assign $bBoxShader;
+            select -cl;
+            hyperShade -objects $bBoxShader;
+            select -cl; 
+            select -r;
+            
+            if(`radioButtonGrp -q -select myRadBtnGrp` == 1)//cube
+                select ($selected[0] + "_bBox");
+            if(`radioButtonGrp -q -select myRadBtnGrp` == 2)//sphere
+                select ($selected[0] + "_bSphere"); 
+                
+            sets -e -forceElement bBoxShaderSG; //
+            select -cl; 
+            select -r;
+            setAttr "bBoxShader.transparency" -type double3 $transparencyValue $transparencyValue $transparencyValue ;
+            setAttr "bBoxShader.color" -type double3 $color[0] $color[1] $color[2] ;
+        }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////        
+        int $isParentOn = 0;
+        $isParentOn = `checkBox -q -value parentMeshName`; //
+        if($isParentOn == 1)//
+        {
+          select -cl; 
+          select -r;
+          
+          if(`radioButtonGrp -q -select myRadBtnGrp` == 1)//cube
+                select -r $selected[0] ($selected[0] + "_bBox");
+          if(`radioButtonGrp -q -select myRadBtnGrp` == 2)//sphere
+                select -r $selected[0] ($selected[0] + "_bSphere"); 
+          
+          parent; 
+        }
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////         
+        int $isLockAttrOn = 0;
+        $isLockAttrOn = `checkBox -q -value lockAttrName`;
+        if($isLockAttrOn == 1)//
+        {
+          select -cl; 
+          select -r;
+          
+          if(`radioButtonGrp -q -select myRadBtnGrp` == 1)//cube
+          {
+              setAttr -l true ($selected[0] + "_bBox" + ".translateX");
+              setAttr -l true ($selected[0] + "_bBox" + ".translateY");
+              setAttr -l true ($selected[0] + "_bBox" + ".translateZ");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateX");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateY");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateZ");
+              setAttr -l true ($selected[0] + "_bBox" + ".scaleX");
+              setAttr -l true ($selected[0] + "_bBox" + ".scaleY");
+              setAttr -l true ($selected[0] + "_bBox" + ".scaleZ");
+              setAttr -l true ($selected[0] + "_bBox" + ".shearXY");
+              setAttr -l true ($selected[0] + "_bBox" + ".shearXZ");
+              setAttr -l true ($selected[0] + "_bBox" + ".shearYZ");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateAxisX");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateAxisY");
+              setAttr -l true ($selected[0] + "_bBox" + ".rotateAxisZ");
+          }
+          if(`radioButtonGrp -q -select myRadBtnGrp` == 2)//sphere
+          {
+              setAttr -l true ($selected[0] + "_bSphere" + ".translateX");
+              setAttr -l true ($selected[0] + "_bSphere" + ".translateY");
+              setAttr -l true ($selected[0] + "_bSphere" + ".translateZ");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateX");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateY");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateZ");
+              setAttr -l true ($selected[0] + "_bSphere" + ".scaleX");
+              setAttr -l true ($selected[0] + "_bSphere" + ".scaleY");
+              setAttr -l true ($selected[0] + "_bSphere" + ".scaleZ");
+              setAttr -l true ($selected[0] + "_bSphere" + ".shearXY");
+              setAttr -l true ($selected[0] + "_bSphere" + ".shearXZ");
+              setAttr -l true ($selected[0] + "_bSphere" + ".shearYZ");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateAxisX");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateAxisY");
+              setAttr -l true ($selected[0] + "_bSphere" + ".rotateAxisZ");
+          }
+        }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+        int $isCreateLayerOn = 0;
+        $isCreateLayerOn = `checkBox -q -value createLayerName`; //
+        if($isCreateLayerOn == 1)//
+        {
+            // determine the number of display layers in the scene
+		    $num = size(`ls -type  displayLayer`) + 1;
+		    $layer = `createDisplayLayer -name "layer1" -number $num -empty`;
+		    
+		    if(`radioButtonGrp -q -select myRadBtnGrp` == 1)//cube
+                select -r $selected[0] ($selected[0] + "_bBox");
+            if(`radioButtonGrp -q -select myRadBtnGrp` == 2)//sphere
+                select -r $selected[0] ($selected[0] + "_bSphere"); 
+                
+            layerEditorAddObjects $layer;    
+        }
+    }
+
+//Huvudmeny 
+    string $MyWindow = "myWindow";
+    
+    if(`window -ex $MyWindow`)
+    {
+        deleteUI $MyWindow;
+    }
+    
+    window -title "Create Bounding Box" -w 200 -h 200 myWindow;
+    
+    columnLayout;
+        //bounding box type
+        frameLayout -collapsable true -label "Bounding Box Type";       
+            columnLayout;
+                $AxisAligned = `checkBox -label "Axis Aligned" axisAlignName`;
+                radioButtonGrp  
+                    -numberOfRadioButtons 2
+                    -label "Bounding Box Type" 
+                    -labelArray3 "Cube" "Sphere"
+                    -select
+                    myRadBtnGrp;
+                    //button -label "create object type" -command "makeObj()" myBtn1; //Skapar form efter val
+                setParent ..;
+        setParent ..;           
+        //bounding box offset 
+        frameLayout -collapsable true -label "Bounding Box Offset" offsetSliderName;       
+                columnLayout;
+                   floatSliderGrp -label "Offset" -field true
+                        -minValue 0.10 -maxValue 2.00
+                        -fieldMinValue 0.10 -fieldMaxValue 10.00 
+                        -value 1.00 offsetValue;
+                    setParent ..;
+        setParent ..;   
+        //bounding box shader     
+        frameLayout -collapsable true -label "Bounding Box Shader";       
+                columnLayout;                 
+                    $NewShader = `checkBox -label "Create New Bounding Box Shader" newShaderName`;
+                    colorSliderGrp -label "Color" -rgb 0 0 0 nameRGBslider;
+                    floatSliderGrp -label "Transparency" -field true 
+                        -minValue 0.0 -maxValue 1.0
+                        -fieldMinValue 0.0 -fieldMaxValue 1.0 
+                        -value .5 transparencyValue;                 
+                    setParent ..;
+        setParent ..;
+        //bounding box settings        
+        frameLayout -collapsable true -label "Bounding Box Settings";       
+                columnLayout;
+                    $ParentMesh = `checkBox -label "Parent Bounding Box with Mesh" parentMeshName`; 
+                    $LockAttr = `checkBox -label "Lock Bounding Box Attributes" lockAttrName`; 
+                    $Layer = `checkBox -label "Create Layer for Bounding Box" createLayerName`; 
+                    setParent ..;
+       setParent ..;
+       rowLayout -numberOfColumns 3 -columnWidth3 50 50 50;
+                 button -label "Create BBox" -width 100 -command "createBoundingBox()"; //
+                 button -label "Undo" -width 100 -command undo; //        
+                 $command = ("deleteUI " + $MyWindow);  //
+                 button -width 100 -label "Exit" -command $command;        
+    showWindow;
+}
